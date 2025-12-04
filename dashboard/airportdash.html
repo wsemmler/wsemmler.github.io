@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Germany Airports Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- CSS Libraries -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css"/>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+<!-- JS Libraries -->
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+
+<style>
+html, body {height:100%; margin:0; padding:0; background:#f0f0f0; font-family:Arial,sans-serif;}
+#dashboard {width:95%; max-width:1400px; margin:20px auto; background:white; border-radius:10px; padding:15px; box-shadow:0 4px 15px rgba(0,0,0,0.2);}
+#map {width:100%; height:600px; border-radius:10px; border:0.5px solid #ccc;}
+#chart, #bar-chart {width:100%; height:600px;}
+.legend-card, .filter-card {position:absolute; z-index:9999; font-size:12px;}
+.legend-card {top:70%; left:20px; width:220px; max-height:500px; overflow-y:auto;}
+.legend-card .accordion-button {padding:0.25rem 0.5rem; font-size:14px;}
+.filter-card {top:20px; right:20px; width:200px;}
+.filter-card .list-group-item, .legend-card .list-group-item {padding:0.2rem 0.5rem; font-size:14px;}
+.airport-item {cursor:pointer;} .airport-item:hover {color:blue; text-decoration:underline;}
+.icon-img {width:22px; height:22px; margin-right:6px;}
+.color-square {display:inline-block; width:15px; height:15px; margin-right:6px; vertical-align:middle;}
+</style>
+</head>
+<body>
+
+<div id="dashboard">
+
+<!-- Tabs navigation -->
+<ul class="nav nav-pills mb-3" id="dashboard-tabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="map-tab" data-bs-toggle="pill" data-bs-target="#map-content" type="button" role="tab" aria-controls="map-content" aria-selected="true">Map</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="chart-tab" data-bs-toggle="pill" data-bs-target="#chart-content" type="button" role="tab" aria-controls="chart-content" aria-selected="false">Flight Traffic</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="bar-tab" data-bs-toggle="pill" data-bs-target="#bar-content" type="button" role="tab" aria-controls="bar-content" aria-selected="false">Cumulative Traffic</button>
+  </li>
+</ul>
+
+<!-- Tabs content -->
+<div class="tab-content" id="dashboard-tabs-content">
+
+  <!-- MAP TAB -->
+  <div class="tab-pane fade show active position-relative" id="map-content" role="tabpanel" aria-labelledby="map-tab">
+    <div id="map"></div>
+
+    <div class="card legend-card shadow">
+      <div class="card-header"><b>Airport Types</b></div>
+      <div class="accordion" id="airportAccordion"></div>
+    </div>
+
+    <div class="card filter-card shadow">
+      <div class="card-header"><b>Filter by Type</b></div>
+      <ul class="list-group list-group-flush" id="filterList"></ul>
+    </div>
+  </div>
+
+  <!-- LINE CHART TAB -->
+  <div class="tab-pane fade position-relative" id="chart-content" role="tabpanel" aria-labelledby="chart-tab">
+    <div id="chart"></div>
+    <div class="filter-card">
+      <div class="accordion" id="airportChartAccordion">
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="headingChart">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseAirportsChart">
+              Airport Filter
+            </button>
+          </h2>
+          <div id="collapseAirportsChart" class="accordion-collapse collapse">
+            <div class="accordion-body" id="dropdown-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BAR CHART TAB -->
+  <div class="tab-pane fade position-relative" id="bar-content" role="tabpanel" aria-labelledby="bar-tab">
+    <div id="bar-chart"></div>
+  </div>
+
+</div>
+</div>
+
+<!-- Load airport data -->
+<script src="airport_data.js"></script>
+
+<!-- MAP SCRIPT -->
+<script>
+var map = L.map('map').setView([51.1657, 10.4515], 6);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'&copy; OSM contributors'}).addTo(map);
+
+var icon_urls = {
+    'large_airport':'https://img.icons8.com/color/48/000000/airport.png',
+    'medium_airport':'https://img.icons8.com/color/48/000000/airport.png',
+    'small_airport':'https://img.icons8.com/color/48/000000/airplane-take-off.png',
+    'heliport':'https://img.icons8.com/color/48/000000/helicopter.png',
+    'seaplane_base':'https://img.icons8.com/color/48/000000/seaplane.png',
+    'balloonport':'https://img.icons8.com/color/48/000000/hot-air-balloon.png',
+    'closed':'https://img.icons8.com/color/48/000000/no-entry.png'
+};
+
+// Group airports by type
+var airportByType = {};
+airports.forEach(a=>{
+    if(!airportByType[a.type]) airportByType[a.type]=[];
+    airportByType[a.type].push(a.name);
+});
+
+// Marker clusters and lookup
+var layerGroups = {}, markerLookup = {};
+Object.keys(icon_urls).forEach(type=>{
+    let cluster = L.markerClusterGroup();
+    layerGroups[type]=cluster;
+    map.addLayer(cluster);
+});
+
+// Add markers
+airports.forEach(a=>{
+    let marker=L.marker([a.lat,a.lon],{icon:L.icon({iconUrl:icon_urls[a.type],iconSize:[30,30]}),title:a.name})
+        .bindPopup(`<b>${a.name}</b><br>City: ${a.city}<br>Type: ${a.type}`);
+    marker.addTo(layerGroups[a.type]);
+    markerLookup[a.name]=marker;
+});
+
+// Build Accordion Legend
+let acc=document.getElementById("airportAccordion");
+let index=0;
+Object.keys(airportByType).forEach(type=>{
+    let id="acc"+index;
+    acc.innerHTML+=`
+    <div class="accordion-item">
+        <h2 class="accordion-header" id="${id}">
+            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse_${id}">
+                <img src="${icon_urls[type]}" class="icon-img">${type}
+            </button>
+        </h2>
+        <div id="collapse_${id}" class="accordion-collapse collapse">
+            <div class="accordion-body p-0">
+                <ul class="list-group list-group-flush">
+                    ${airportByType[type].map(n=>`<li class="list-group-item airport-item">${n}</li>`).join('')}
+                </ul>
+            </div>
+        </div>
+    </div>`;
+    index++;
+});
+
+// Click airport to zoom
+setTimeout(()=>document.querySelectorAll(".airport-item").forEach(li=>{
+    li.addEventListener("click",()=>{
+        let m=markerLookup[li.innerText];
+        if(m){map.setView(m.getLatLng(),12); m.openPopup();}
+    });
+}),500);
+
+// Build Filter Panel
+let filter=document.getElementById("filterList");
+Object.keys(icon_urls).forEach(type=>{
+    filter.innerHTML+=`
+    <li class="list-group-item">
+        <input class="form-check-input me-2 type-filter" type="checkbox" checked id="${type}">
+        <img src="${icon_urls[type]}" class="icon-img">
+        <label for="${type}" class="form-check-label">${type}</label>
+    </li>`;
+});
+
+// Filter logic
+document.querySelectorAll(".type-filter").forEach(cb=>{
+    cb.addEventListener("change",()=>{
+        let type=cb.id;
+        if(cb.checked) map.addLayer(layerGroups[type]);
+        else map.removeLayer(layerGroups[type]);
+    });
+});
+
+// Fix map size when tab shown
+document.getElementById('map-tab').addEventListener('shown.bs.tab', ()=>map.invalidateSize());
+</script>
+
+<!-- LINE CHART AND BAR CHART SCRIPT -->
+<script>
+// ---------- Data ----------
+const years = ['2010','2011','2012','2013','2014','2015','2016','2017','2018','2019','2020','2021','2022','2023','2024'];
+const colors = ['#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf'];
+
+const lineData = [
+  {name:'Berlin', 2010:220749,2011:230495,2012:231244,2013:228649,2014:240179,2015:248954,2016:271126,2017:263200,2018:279936,2019:300000,2020:250000,2021:200000,2022:220000,2023:210000,2024:182138},
+  {name:'Bremen', 2010:38893,2011:38598,2012:38295,2013:37845,2014:39344,2015:35564,2016:33563,2017:30164,2018:31085,2019:32000,2020:28000,2021:25000,2022:27000,2023:26000,2024:22682},
+  {name:'Düsseldorf', 2010:209736,2011:214266,2012:210298,2013:204881,2014:205686,2015:204883,2016:211666,2017:214714,2018:211804,2019:220000,2020:200000,2021:180000,2022:190000,2023:185000,2024:150624},
+  {name:'Frankfurt', 2010:458279,2011:481065,2012:475569,2013:465851,2014:462559,2015:461160,2016:456830,2017:469289,2018:505421,2019:510000,2020:480000,2021:450000,2022:460000,2023:445000,2024:434230},
+  {name:'Hamburg', 2010:137979,2011:141326,2012:137201,2013:129503,2014:139325,2015:143198,2016:145266,2017:146024,2018:140989,2019:150000,2020:130000,2021:120000,2022:125000,2023:118000,2024:111000},
+  {name:'Cologne', 2010:121011,2011:117715,2012:112699,2013:107290,2014:110333,2015:115181,2016:123965,2017:128549,2018:132017,2019:135000,2020:120000,2021:110000,2022:115000,2023:108000,2024:106503},
+  {name:'Leipzig', 2010:57727,2011:58982,2012:58640,2013:57588,2014:58887,2015:60153,2016:59213,2017:63596,2018:71330,2019:72000,2020:65000,2021:60000,2022:64000,2023:63000,2024:68584},
+  {name:'Munich', 2010:378919,2011:399581,2012:387983,2013:372010,2014:367599,2015:370348,2016:385081,2017:395047,2018:403691,2019:410000,2020:380000,2021:350000,2022:360000,2023:340000,2024:318948},
+  {name:'Nuremberg', 2010:55980,2011:53772,2012:50434,2013:48336,2014:42851,2015:41502,2016:41907,2017:45873,2018:46402,2019:47000,2020:42000,2021:39000,2022:40000,2023:38000,2024:32705},
+  {name:'Stuttgart', 2010:119752,2011:121401,2012:115354,2013:109611,2014:108531,2015:113125,2016:112558,2017:111330,2018:121281,2019:125000,2020:110000,2021:100000,2022:105000,2023:95000,2024:81562}
+];
+
+// ---------- LINE CHART ----------
+const yMax = Math.max(...lineData.flatMap(a=>years.map(y=>a[y])));
+const lineTraces = lineData.map((a,i)=>({x:years, y:years.map(y=>a[y]), mode:'lines+markers', name:a.name, line:{color:colors[i%colors.length]}, visible:true}));
+lineTraces.push({x:[0], y:[0], mode:'lines+markers', name:'All Airports', line:{color:'#000000'}, visible:true, showlegend:true});
+const lineFrames = years.map(y=>({name:y,data:lineData.map((a,i)=>({x:years.slice(0,years.indexOf(y)+1), y:years.slice(0,years.indexOf(y)+1).map(yy=>a[yy]), mode:'lines+markers', line:{color:colors[i%colors.length]}, name:a.name}))}));
+const lineLayout = {
+    title:'Commercial Flight Traffic',
+    xaxis:{title:'Year', dtick:1, range:[2010,2024]},
+    yaxis:{title:'Flights', range:[0,yMax]},
+    height:600,
+    updatemenus:[{type:"buttons", direction:"right", x:-0.02, y:-0.18, buttons:[{label:"Play", method:"animate", args:[null, {frame:{duration:800, redraw:true}, fromcurrent:true}]},{label:"Pause", method:"animate", args:[[null], {frame:{duration:0, redraw:true}, mode:"immediate"}]}]}],
+    sliders:[{pad:{t:50}, currentvalue:{prefix:"Year: "}, steps: years.map(y=>({label:y, method:'animate', args:[[y], {mode:'immediate', frame:{duration:500, redraw:true}}]}))}]
+};
+Plotly.newPlot('chart', lineTraces, lineLayout).then(()=>Plotly.addFrames('chart', lineFrames));
+const chart = document.getElementById('chart');
+chart.on('plotly_legendclick', function(eventData){
+    if(eventData.curveNumber === lineTraces.length-1){
+        const newVisibility = lineTraces.slice(0,lineTraces.length-1).map((t,i)=>{
+            const cur=chart.data[i].visible;
+            return cur===true||cur===undefined?'legendonly':true;
+        });
+        newVisibility.forEach((v,idx)=>Plotly.restyle(chart,{visible:[v]},[idx]));
+        return false;
+    }
+});
+document.getElementById('chart-tab').addEventListener('shown.bs.tab',()=>Plotly.Plots.resize(chart));
+
+// Airport Filter Accordion
+const dropdownList=document.getElementById('dropdown-list');
+lineData.forEach((airport,i)=>{
+    const div = document.createElement('div');
+    div.innerHTML = `<input type="checkbox" checked id="chk_${i}"> 
+                     <span class="color-square" style="background:${colors[i%colors.length]}"></span> 
+                     <label for="chk_${i}">${airport.name}</label>`;
+    dropdownList.appendChild(div);
+
+    document.getElementById(`chk_${i}`).addEventListener("change", ()=>{
+        const update = { visible: [] };
+        lineTraces.forEach((t,j)=>{
+            if(j < lineData.length){ 
+                update.visible.push(document.getElementById(`chk_${j}`).checked ? true : 'legendonly');
+            } else {
+                update.visible.push(true);
+            }
+        });
+        Plotly.restyle('chart', update);
+    });
+});
+
+// ---------- BAR CHART ----------
+const barData=lineData.map(a=>({...a}));
+barData.forEach(a=>{let cum=0;a.cumulative=years.map(y=>cum+=a[y]);});
+const barYMax=Math.max(...barData.flatMap(a=>a.cumulative));
+const barTraces=barData.map((a,i)=>({x:[a.name],y:[a.cumulative[0]],type:'bar',name:a.name,marker:{color:colors[i%colors.length]},visible:true}));
+barTraces.push({x:[0],y:[0],type:'bar',name:'All Airports',marker:{color:'#000'},visible:true,showlegend:true});
+const barFrames = years.map((y,idx)=>({name:y,data:barData.map((a,i)=>({x:[a.name],y:[a.cumulative[idx]],type:'bar',marker:{color:colors[i%colors.length]},name:a.name}))}));
+const barLayout = {
+    title:'Cumulative Flight Traffic by Airport',
+    xaxis:{title:'Airport'},
+    yaxis:{title:'Commercial Traffic', range:[0,barYMax*1.05]},
+    barmode:'group',
+    height:600,
+    updatemenus:[{
+        type:"buttons",
+        direction:"right",
+        x:-0.02,
+        y:-0.18,
+        buttons:[
+            {label:"Play", method:"animate", args:[null,{frame:{duration:800, redraw:true}, fromcurrent:true}]},
+            {label:"Pause", method:"animate", args:[[null],{frame:{duration:0, redraw:true}, mode:"immediate"}]}
+        ]
+    }],
+    sliders:[{
+        pad:{t:50},
+        currentvalue:{prefix:"Year: "},
+        steps: years.map(y=>({label:y, method:'animate', args:[[y], {mode:'immediate', frame:{duration:500, redraw:true}}]}))
+    }]
+};
+Plotly.newPlot('bar-chart', barTraces, barLayout).then(()=>Plotly.addFrames('bar-chart', barFrames));
+const barChart = document.getElementById('bar-chart');
+barChart.on('plotly_legendclick', function(eventData){
+    if(eventData.curveNumber === barTraces.length - 1){
+        Plotly.animate(barChart, [], {mode:'immediate'});
+        const newVisibility=barTraces.slice(0,barTraces.length-1).map((t,i)=>{
+            const cur=barChart.data[i].visible;
+            return cur===true||cur===undefined?'legendonly':true;
+        });
+        newVisibility.forEach((v,idx)=>Plotly.restyle(barChart,{visible:[v]},[idx]));
+        return false;
+    }
+});
+document.getElementById('bar-tab').addEventListener('shown.bs.tab',()=>Plotly.Plots.resize(barChart));
+</script>
+
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
